@@ -17,6 +17,31 @@ struct context {
   uint64 s10;
   uint64 s11;
 };
+// Precognition state for each process.
+#define PRECOG_HISTORY 8
+struct precog_state {
+  int valid;
+
+  // Recent CPU activity observations.
+  uint64 cpu_history[PRECOG_HISTORY];
+
+  // Number of observations currently stored.
+  int history_count;
+
+  // Position of the next observation.
+  int history_index;
+
+  // Predicted CPU demand.
+  uint64 predicted_cpu;
+
+  // Start time of the current CPU execution.
+  
+  // Number of scheduler execution intervals used.
+  uint64 cpu_burst;
+  // Number of CPU ticks collected since
+// the last precognition observation.
+uint64 observation_ticks;
+};
 
 // Per-CPU state.
 struct cpu {
@@ -80,6 +105,8 @@ enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
 struct proc {
+    // Precognition state for this process.
+  struct precog_state precog;
   struct spinlock lock;
 
   // p->lock must be held when using these:

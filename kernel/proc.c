@@ -5,6 +5,8 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "precog.h"
+
 
 struct cpu cpus[NCPU];
 
@@ -109,6 +111,7 @@ allocpid()
 static struct proc *
 allocproc(void)
 {
+
   struct proc *p;
 
   for (p = proc; p < &proc[NPROC]; p++) {
@@ -123,6 +126,17 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+    // Initialize precognition state for this process.
+  p->precog.valid = 1;
+  p->precog.history_count = 0;
+  p->precog.history_index = 0;
+  p->precog.predicted_cpu = 0;
+  
+  p->precog.cpu_burst = 0;
+  p->precog.observation_ticks = 0;
+
+  for(int i = 0; i < PRECOG_HISTORY; i++)
+    p->precog.cpu_history[i] = 0;
   p->state = USED;
 
   // Allocate a trapframe page.
@@ -417,65 +431,92 @@ kwait(uint64 addr)
     acquire(&wait_lock);
   }
 }
-
 // Per-CPU process scheduler.
-// Each CPU calls scheduler() after setting itself up.
-// Scheduler never returns.  It loops, doing:
-//  - choose a process to run.
-//  - swtch to start running that process.
-//  - eventually that process transfers control
-//    via swtch back to the scheduler.
+// Chooses the RUNNABLE process using predicted CPU demand.
+// Per-CPU process scheduler.
+// Chooses a RUNNABLE process using predicted CPU demand.
 void
 scheduler(void)
 {
   struct proc *p;
+  struct proc *best;
   struct cpu *c = mycpu();
 
   c->proc = 0;
-  for (;;) {
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
+
+  for(;;){
+    uint64 best_score;
+    uint64 predicted;
+    uint64 score;
+    int found;
+
+    best = 0;
+    best_score = 0;
+    found = 0;
+
     intr_on();
     intr_off();
 
-    int found = 0;
-    for (p = proc; p < &proc[NPROC]; p++) {
+    // Find the RUNNABLE process with the highest
+    // prediction-based score.
+    for(p = proc; p < &proc[NPROC]; p++){
       acquire(&p->lock);
-      if (p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
 
-        // Don't re-enable interrupts on release.
-        mycpu()->intena = 0;
+      if(p->state == RUNNABLE){
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+        predicted = precog_predict_cpu(p);
+
+        if(predicted == 0)
+          predicted = 1;
+
+        // Smaller predicted CPU demand gets
+        // a larger scheduling score.
+        score = 1000 / (predicted + 1);
+
+        if(!found || score > best_score){
+          best = p;
+          best_score = score;
+          found = 1;
+        }
       }
+
       release(&p->lock);
     }
-    if (found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
+
+    // Run the selected process.
+    if(found && best != 0){
+      acquire(&best->lock);
+
+      // Check again because another CPU may have
+      // changed this process after our first scan.
+      if(best->state == RUNNABLE){
+
+        acquire(&tickslock);
+        best->precog.start_tick = ticks;
+        release(&tickslock);
+
+        best->state = RUNNING;
+        c->proc = best;
+
+      
+
+        swtch(&c->context, &best->context);
+
+        // Process returned to scheduler.
+        c->proc = 0;
+
+        release(&best->lock);
+      }
+      else{
+        release(&best->lock);
+      }
+    }
+    else{
       asm volatile("wfi");
     }
   }
 }
 
-// Switch to scheduler.  Must hold only p->lock
-// and have changed proc->state. Saves and restores
-// intena because intena is a property of this
-// kernel thread, not this CPU. It should
-// be proc->intena and proc->noff, but that would
-// break in the few places where a lock is held but
-// there's no process.
 void
 sched(void)
 {
@@ -495,18 +536,53 @@ sched(void)
   swtch(&p->context, &mycpu()->context);
   mycpu()->intena = intena;
 }
+// Record the CPU time used by the current process.
+static void
+precog_record_elapsed_cpu(struct proc *p)
+{
+  uint64 now;
+  uint64 elapsed;
+
+  if(p == 0)
+    return;
+
+  acquire(&tickslock);
+  now = ticks;
+  release(&tickslock);
+
+  if(now >= p->precog.start_tick)
+    elapsed = now - p->precog.start_tick;
+  else
+    elapsed = 0;
+
+  /*
+   * Accumulate CPU activity for this process.
+   *
+   * We always count at least one execution interval.
+   */
+  if(elapsed == 0)
+    elapsed = 1;
+
+  p->precog.cpu_burst += elapsed;
+}
 
 // Give up the CPU for one scheduling round.
 void
 yield(void)
 {
   struct proc *p = myproc();
+
   acquire(&p->lock);
+
+  // Record actual CPU time used by this process.
+  precog_record_elapsed_cpu(p);
+
   p->state = RUNNABLE;
+
   sched();
+
   release(&p->lock);
 }
-
 // A fork child's very first scheduling by scheduler()
 // will swtch to forkret.
 void
@@ -565,10 +641,22 @@ sleep(void)
   struct proc *p = myproc();
 
   acquire(&p->lock);
-  if (p->chan != 0) {
+
+  if(p->chan != 0){
+
+    // Record CPU activity before sleeping.
+    precog_record_elapsed_cpu(p);
+
+    // Store the completed CPU burst.
+    if(p->precog.cpu_burst > 0){
+      precog_record_cpu(p, p->precog.cpu_burst);
+      p->precog.cpu_burst = 0;
+    }
+
     p->state = SLEEPING;
     sched();
   }
+
   release(&p->lock);
 }
 

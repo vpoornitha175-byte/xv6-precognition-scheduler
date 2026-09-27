@@ -166,7 +166,21 @@ kerneltrap()
 void
 clockintr()
 {
-  if (cpuid() == 0) {
+  struct proc *p;
+
+  /*
+   * Record CPU activity for the process currently
+   * running on this CPU.
+   *
+   * One timer interrupt = one CPU activity unit.
+   */
+  p = myproc();
+
+  if(p != 0 && p->state == RUNNING){
+    p->precog.cpu_burst++;
+  }
+
+  if(cpuid() == 0){
     acquire(&tickslock);
     ticks++;
     wakeup(&ticks);
@@ -178,7 +192,6 @@ clockintr()
   // of a second.
   w_stimecmp(r_time() + 1000000);
 }
-
 // check if it's an external interrupt or software interrupt,
 // and handle it.
 // returns 2 if timer interrupt,
