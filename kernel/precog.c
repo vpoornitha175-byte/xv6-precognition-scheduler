@@ -28,7 +28,6 @@ precog_init_process(struct proc *p)
   p->precog.history_count = 0;
   p->precog.history_index = 0;
   p->precog.predicted_cpu = 0;
-  p->precog.start_tick = 0;
   p->precog.cpu_burst = 0;
 
   for(i = 0; i < PRECOG_HISTORY; i++)
@@ -36,25 +35,34 @@ precog_init_process(struct proc *p)
 }
 
 // Record one CPU observation for a process.
+
 void
 precog_record_cpu(struct proc *p, uint64 cpu_ticks)
 {
+  static int record_log_count = 0;
+
   if(p == 0)
     return;
 
   if(!p->precog.valid)
     precog_init_process(p);
 
-  p->precog.cpu_history[p->precog.history_index] =
-      cpu_ticks;
+  p->precog.cpu_history[p->precog.history_index] = cpu_ticks;
 
   p->precog.history_index =
       (p->precog.history_index + 1) % PRECOG_HISTORY;
 
   if(p->precog.history_count < PRECOG_HISTORY)
     p->precog.history_count++;
-}
 
+  if(record_log_count < 30){
+    printk("HISTORY: PID=%d CPU=%d Count=%d\n",
+           p->pid,
+           (int)cpu_ticks,
+           p->precog.history_count);
+    record_log_count++;
+  }
+}
 // Calculate predicted CPU demand.
 uint64
 precog_predict_cpu(struct proc *p)

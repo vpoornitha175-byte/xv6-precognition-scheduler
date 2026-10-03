@@ -336,17 +336,24 @@ reparent(struct proc *p)
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
+
 void
 kexit(int status)
 {
   struct proc *p = myproc();
 
-  if (p == initproc)
+  if(p == initproc)
     panic("init exiting");
 
+  // Record the final CPU burst before termination.
+  if(p->precog.cpu_burst > 0){
+    precog_record_cpu(p, p->precog.cpu_burst);
+    p->precog.cpu_burst = 0;
+  }
+
   // Close all open files.
-  for (int fd = 0; fd < NOFILE; fd++) {
-    if (p->ofile[fd]) {
+  for(int fd = 0; fd < NOFILE; fd++){
+    if(p->ofile[fd]){
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
@@ -375,6 +382,7 @@ kexit(int status)
 
   // Jump into the scheduler, never to return.
   sched();
+
   panic("zombie exit");
 }
 
@@ -435,23 +443,27 @@ kwait(uint64 addr)
 // Chooses the RUNNABLE process using predicted CPU demand.
 // Per-CPU process scheduler.
 // Chooses a RUNNABLE process using predicted CPU demand.
+
 void
 scheduler(void)
 {
   struct proc *p;
   struct proc *best;
   struct cpu *c = mycpu();
+  static int log_count = 0;
 
   c->proc = 0;
 
   for(;;){
     uint64 best_score;
     uint64 predicted;
+    uint64 best_predicted;
     uint64 score;
     int found;
 
     best = 0;
     best_score = 0;
+    best_predicted = 0;
     found = 0;
 
     intr_on();
@@ -463,7 +475,6 @@ scheduler(void)
       acquire(&p->lock);
 
       if(p->state == RUNNABLE){
-
         predicted = precog_predict_cpu(p);
 
         if(predicted == 0)
@@ -476,6 +487,7 @@ scheduler(void)
         if(!found || score > best_score){
           best = p;
           best_score = score;
+          best_predicted = predicted;
           found = 1;
         }
       }
@@ -492,13 +504,18 @@ scheduler(void)
       if(best->state == RUNNABLE){
 
         acquire(&tickslock);
-        best->precog.start_tick = ticks;
         release(&tickslock);
 
+        // Display prediction information.
+      if(best->pid >= 3 && log_count < 30){
+  printk("PRECOG SELECTED: PID=%d Predicted CPU=%d Score=%d\n",
+         best->pid,
+         (int)best_predicted,
+         (int)best_score);
+  log_count++;
+} 
         best->state = RUNNING;
         c->proc = best;
-
-      
 
         swtch(&c->context, &best->context);
 
@@ -516,7 +533,6 @@ scheduler(void)
     }
   }
 }
-
 void
 sched(void)
 {
@@ -536,37 +552,10 @@ sched(void)
   swtch(&p->context, &mycpu()->context);
   mycpu()->intena = intena;
 }
-// Record the CPU time used by the current process.
-static void
-precog_record_elapsed_cpu(struct proc *p)
-{
-  uint64 now;
-  uint64 elapsed;
 
-  if(p == 0)
-    return;
 
-  acquire(&tickslock);
-  now = ticks;
-  release(&tickslock);
 
-  if(now >= p->precog.start_tick)
-    elapsed = now - p->precog.start_tick;
-  else
-    elapsed = 0;
 
-  /*
-   * Accumulate CPU activity for this process.
-   *
-   * We always count at least one execution interval.
-   */
-  if(elapsed == 0)
-    elapsed = 1;
-
-  p->precog.cpu_burst += elapsed;
-}
-
-// Give up the CPU for one scheduling round.
 void
 yield(void)
 {
@@ -574,9 +563,12 @@ yield(void)
 
   acquire(&p->lock);
 
-  // Record actual CPU time used by this process.
-  precog_record_elapsed_cpu(p);
+  // Record cumulative CPU usage.
+  if(p->precog.cpu_burst > 0){
+    precog_record_cpu(p, p->precog.cpu_burst);
+  }
 
+  // Preserve cpu_burst across timer preemptions.
   p->state = RUNNABLE;
 
   sched();
@@ -635,6 +627,7 @@ sleep_prepare(void *chan)
 // Put the thread to sleep.  Assumes sleep_prepare() was called before.
 // If the channel registered by sleep_prepare() has been woken up in
 // the meantime, do not go to sleep, and instead return immediately.
+
 void
 sleep(void)
 {
@@ -644,10 +637,7 @@ sleep(void)
 
   if(p->chan != 0){
 
-    // Record CPU activity before sleeping.
-    precog_record_elapsed_cpu(p);
-
-    // Store the completed CPU burst.
+    // Record the completed CPU burst.
     if(p->precog.cpu_burst > 0){
       precog_record_cpu(p, p->precog.cpu_burst);
       p->precog.cpu_burst = 0;
@@ -659,7 +649,6 @@ sleep(void)
 
   release(&p->lock);
 }
-
 // Wake up all processes sleeping on channel chan.
 void
 wakeup(void *chan)
