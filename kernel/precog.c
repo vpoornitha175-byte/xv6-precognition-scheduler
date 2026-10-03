@@ -29,7 +29,7 @@ precog_init_process(struct proc *p)
   p->precog.history_index = 0;
   p->precog.predicted_cpu = 0;
   p->precog.cpu_burst = 0;
-
+p->precog.scheduling_count = 0;
   for(i = 0; i < PRECOG_HISTORY; i++)
     p->precog.cpu_history[i] = 0;
 }

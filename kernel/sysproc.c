@@ -110,3 +110,15 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+uint64
+sys_getprecogcount(void)
+{
+  struct proc *p;
+
+  p = myproc();
+
+  if(p == 0)
+    return -1;
+
+  return p->precog.scheduling_count;
+}

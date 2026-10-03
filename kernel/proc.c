@@ -507,13 +507,17 @@ scheduler(void)
         release(&tickslock);
 
         // Display prediction information.
-      if(best->pid >= 3 && log_count < 30){
-  printk("PRECOG SELECTED: PID=%d Predicted CPU=%d Score=%d\n",
+      best->precog.scheduling_count++;
+
+if(best->pid >= 3 && log_count < 30){
+  printk("PRECOG SELECTED: PID=%d Predicted CPU=%d Score=%d Count=%d\n",
          best->pid,
          (int)best_predicted,
-         (int)best_score);
+         (int)best_score,
+         (int)best->precog.scheduling_count);
   log_count++;
 } 
+
         best->state = RUNNING;
         c->proc = best;
 

@@ -41,6 +41,7 @@ struct precog_state {
   // Number of CPU ticks collected since
 // the last precognition observation.
 uint64 observation_ticks;
+uint64 scheduling_count;
 };
 
 // Per-CPU state.
