@@ -441,8 +441,6 @@ kwait(uint64 addr)
 }
 // Per-CPU process scheduler.
 // Chooses the RUNNABLE process using predicted CPU demand.
-// Per-CPU process scheduler.
-// Chooses a RUNNABLE process using predicted CPU demand.
 
 void
 scheduler(void)
@@ -450,7 +448,7 @@ scheduler(void)
   struct proc *p;
   struct proc *best;
   struct cpu *c = mycpu();
-  static int log_count = 0;
+  static uint64 last_prediction[NPROC];
 
   c->proc = 0;
 
@@ -470,20 +468,26 @@ scheduler(void)
     intr_off();
 
     // Find the RUNNABLE process with the highest
-    // prediction-based score.
+    // prediction-based scheduling score.
     for(p = proc; p < &proc[NPROC]; p++){
       acquire(&p->lock);
 
       if(p->state == RUNNABLE){
+
+        // Predict the CPU demand of this process
+        // using its previous CPU burst history.
         predicted = precog_predict_cpu(p);
 
+        // If there is no history yet, assume a
+        // small initial CPU demand.
         if(predicted == 0)
           predicted = 1;
 
-        // Smaller predicted CPU demand gets
-        // a larger scheduling score.
+        // Smaller predicted CPU demand gets a
+        // larger scheduling score.
         score = 1000 / (predicted + 1);
 
+        // Select the process with the highest score.
         if(!found || score > best_score){
           best = p;
           best_score = score;
@@ -503,40 +507,50 @@ scheduler(void)
       // changed this process after our first scan.
       if(best->state == RUNNABLE){
 
-        acquire(&tickslock);
-        release(&tickslock);
+        // Count how many times this process has
+        // been selected by the scheduler.
+        best->precog.scheduling_count++;
 
         // Display prediction information.
-      best->precog.scheduling_count++;
+        // Only display meaningful predictions to
+        // reduce console output.
+	if(best->pid >= 3 &&
+   	   best_predicted > 1 &&
+   	   last_prediction[best->pid] != best_predicted){
 
-if(best->pid >= 3 && log_count < 30){
-  printk("PRECOG SELECTED: PID=%d Predicted CPU=%d Score=%d Count=%d\n",
-         best->pid,
-         (int)best_predicted,
-         (int)best_score,
-         (int)best->precog.scheduling_count);
-  log_count++;
-} 
+   	   printk("PRECOG SELECT: PID=%d | Prediction=%d | Score=%d\n",
+           best->pid,
+           (int)best_predicted,
+           (int)best_score);
 
+  	   last_prediction[best->pid] = best_predicted;
+ 	}
+        // Mark the process as running.
         best->state = RUNNING;
         c->proc = best;
 
+        // Switch from the scheduler to the selected
+        // process. The process will eventually return
+        // here through sched().
         swtch(&c->context, &best->context);
 
-        // Process returned to scheduler.
+        // The process has stopped running.
         c->proc = 0;
 
         release(&best->lock);
       }
       else{
+        // Process was no longer runnable.
         release(&best->lock);
       }
     }
     else{
+      // No RUNNABLE process is available.
       asm volatile("wfi");
     }
   }
 }
+
 void
 sched(void)
 {

@@ -39,7 +39,6 @@ p->precog.scheduling_count = 0;
 void
 precog_record_cpu(struct proc *p, uint64 cpu_ticks)
 {
-  static int record_log_count = 0;
 
   if(p == 0)
     return;
@@ -55,13 +54,6 @@ precog_record_cpu(struct proc *p, uint64 cpu_ticks)
   if(p->precog.history_count < PRECOG_HISTORY)
     p->precog.history_count++;
 
-  if(record_log_count < 30){
-    printk("HISTORY: PID=%d CPU=%d Count=%d\n",
-           p->pid,
-           (int)cpu_ticks,
-           p->precog.history_count);
-    record_log_count++;
-  }
 }
 // Calculate predicted CPU demand.
 uint64

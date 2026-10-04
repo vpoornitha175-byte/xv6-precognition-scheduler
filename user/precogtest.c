@@ -30,7 +30,6 @@ main(int argc, char *argv[])
   pid = fork();
 
   if(pid == 0){
-    printf("Child 1: small CPU workload\n");
     cpu_work(10000);
     printf("Child 1 finished\n");
     exit(0);
@@ -39,7 +38,6 @@ main(int argc, char *argv[])
   pid = fork();
 
   if(pid == 0){
-    printf("Child 2: medium CPU workload\n");
     cpu_work(50000);
     printf("Child 2 finished\n");
     exit(0);
@@ -48,7 +46,6 @@ main(int argc, char *argv[])
   pid = fork();
 
   if(pid == 0){
-    printf("Child 3: large CPU workload\n");
     cpu_work(100000);
     printf("Child 3 finished\n");
     exit(0);

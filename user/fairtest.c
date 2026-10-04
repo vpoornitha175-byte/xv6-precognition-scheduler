@@ -33,7 +33,6 @@ main(int argc, char *argv[])
   pid = fork();
 
   if(pid == 0){
-    printf("Process 1: Small workload started\n");
 
     cpu_work(10000);
 
@@ -48,7 +47,6 @@ main(int argc, char *argv[])
   pid = fork();
 
   if(pid == 0){
-    printf("Process 2: Medium workload started\n");
 
     cpu_work(50000);
 
@@ -63,7 +61,6 @@ main(int argc, char *argv[])
   pid = fork();
 
   if(pid == 0){
-    printf("Process 3: Large workload started\n");
 
     cpu_work(100000);
 

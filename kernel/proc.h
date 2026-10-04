@@ -20,28 +20,28 @@ struct context {
 // Precognition state for each process.
 #define PRECOG_HISTORY 8
 struct precog_state {
+  //Indicates whether the Precognition state has been initialized
   int valid;
 
-  // Recent CPU activity observations.
+  // Recent CPU activity observations.[upto 8]
   uint64 cpu_history[PRECOG_HISTORY];
 
-  // Number of observations currently stored.
+  // Number of observations currently stored.[0-8]
   int history_count;
 
   // Position of the next observation.
+  // It is to implement circular buffer.old observations are modified by new observations.
   int history_index;
 
   // Predicted CPU demand.
   uint64 predicted_cpu;
 
-  // Start time of the current CPU execution.
-  
-  // Number of scheduler execution intervals used.
+  // CPU time consumed during the current CPU burst.
   uint64 cpu_burst;
   // Number of CPU ticks collected since
-// the last precognition observation.
-uint64 observation_ticks;
-uint64 scheduling_count;
+  uint64 observation_ticks;
+  //Number of times the scheduler selected this process.
+  uint64 scheduling_count;
 };
 
 // Per-CPU state.
